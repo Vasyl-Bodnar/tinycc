@@ -2676,6 +2676,17 @@ static int tcc_output_elf(TCCState *s1, FILE *f, int phnum, ElfW(Phdr) *phdr)
 static int tcc_output_binary(TCCState *s1, FILE *f)
 {
     Section *s;
+#ifdef TCC_TARGET_TEX
+    int i, size;
+
+    for(i=1;i<s1->nb_sections;i++) {
+        s = s1->sections[i];
+        if (0 == strncmp(s->name, ".text", 5)) {
+            size = s->sh_size;
+            fwrite(s->data, 1, size, f);
+        }
+    }
+#else
     int i, offset, size;
 
     offset = 0;
@@ -2692,6 +2703,7 @@ static int tcc_output_binary(TCCState *s1, FILE *f)
             offset += size;
         }
     }
+#endif
     return 0;
 }
 

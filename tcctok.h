@@ -283,7 +283,8 @@
 # endif
 #endif
 
-#if defined TCC_TARGET_C67
+// TODO: REMOVE TeX FROM HERE
+#if defined TCC_TARGET_C67 || defined TCC_TARGET_TEX
      DEF(TOK__divi, "_divi")
      DEF(TOK__divu, "_divu")
      DEF(TOK__divf, "_divf")

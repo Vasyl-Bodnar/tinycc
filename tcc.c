@@ -202,6 +202,8 @@ static const char version[] =
         " OpenBSD"
 #elif TARGETOS_NetBSD
         " NetBSD"
+#elif defined TCC_TARGET_TEX
+        "TeX"
 #else
         " Linux"
 #endif
