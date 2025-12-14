@@ -76,8 +76,11 @@ ST_DATA const int reg_classes[NB_REGS] = {
     /* st0 */ RC_INT | RC_ST0,
 };
 
-#define MAX_STR_SIZE 200
-static char output_str[MAX_STR_SIZE];
+/* TODO: This is a hack so we only need to \newcount once */
+ST_DATA int allocated[NB_REGS] = {0, 0, 0, 0};
+
+#define MAX_STR_SIZE 300
+ST_DATA char output_str[MAX_STR_SIZE];
 
 ST_FUNC void out(const char *str, int size) {
   if (nocode_wanted)
@@ -91,42 +94,107 @@ ST_FUNC void out(const char *str, int size) {
   ind = ind1;
 }
 
+ST_FUNC void out_r_new(int r1) {
+  int size =
+      snprintf(output_str, MAX_STR_SIZE,
+               "\\expandafter\\newcount\\csname @reg%d\\endcsname%%\n", r1);
+  out(output_str, size);
+}
+
 ST_FUNC void out_rr_move(int r1, int r2) {
-  int size = snprintf(
-      output_str, MAX_STR_SIZE,
-      "\\csname @reg%d\\endcsname=\\csname @reg%d\\endcsname%%\n", r1, r2);
+  int size =
+      snprintf(output_str, MAX_STR_SIZE,
+               "\\expandafter\\csname @reg%d\\endcsname=\\expandafter\\csname "
+               "@reg%d\\endcsname%%\n",
+               r1, r2);
   out(output_str, size);
 }
 
 ST_FUNC void out_rc_move(int r1, int cnst) {
-  int size = snprintf(output_str, MAX_STR_SIZE,
-                      "\\csname @reg%d\\endcsname=%d%%\n", r1, cnst);
+  int size =
+      snprintf(output_str, MAX_STR_SIZE,
+               "\\expandafter\\csname @reg%d\\endcsname=%d%%\n", r1, cnst);
   out(output_str, size);
 }
 
 ST_FUNC void out_rm_move(int r1, int addr) {
-  int size = snprintf(
-      output_str, MAX_STR_SIZE,
-      "\\csname @reg%d\\endcsname=\\csname @mem%d\\endcsname%%\n", r1, addr);
+  int size =
+      snprintf(output_str, MAX_STR_SIZE,
+               "\\expandafter\\csname @reg%d\\endcsname=\\expandafter\\csname "
+               "@mem%d\\endcsname%%\n",
+               r1, addr);
   out(output_str, size);
 }
 
 ST_FUNC void out_rs_move(int r1, int st_off) {
   int size;
   if (st_off) {
-    size =
-        snprintf(output_str, MAX_STR_SIZE,
-                 "\\csname @regStTmp\\endcsname=\\csname "
-                 "@regSt\\endcsname%%\n\\advance\\csname @regStTmp\\endcsname"
-                 "by%d%%\n\\csname @reg%d\\endcsname=\\csname "
-                 "@mem\\the\\@regStTmp\\endcsname%%\n",
-                 r1, st_off);
+    size = snprintf(
+        output_str, MAX_STR_SIZE,
+        "\\expandafter\\csname @regStTmp\\endcsname=\\expandafter\\csname "
+        "@regSt\\endcsname%%\n\\advance\\expandafter\\csname "
+        "@regStTmp\\endcsname"
+        "by%d%%\n\\expandafter\\csname @reg%d\\endcsname=\\expandafter\\csname "
+        "@mem\\the\\@regStTmp\\endcsname%%\n",
+        r1, st_off);
   } else {
     size = snprintf(
         output_str, MAX_STR_SIZE,
-        "\\csname @reg%d\\endcsname=\\csname @mem\\the\\@regSt\\endcsname%%\n",
+        "\\expandafter\\csname @reg%d\\endcsname=\\expandafter\\csname "
+        "@mem\\the\\@regSt\\endcsname%%\n",
         r1);
   }
+  out(output_str, size);
+}
+
+ST_FUNC void out_rrm_move(int r1, int r2) {
+  int size =
+      snprintf(output_str, MAX_STR_SIZE,
+               "\\expandafter\\csname @reg%d\\endcsname=\\expandafter\\csname "
+               "@mem\\the\\csname @reg%d\\endcsname\\endcsname%%\n",
+               r1, r2);
+  out(output_str, size);
+}
+
+ST_FUNC void out_mr_move(int addr, int r2) {
+  int size =
+      snprintf(output_str, MAX_STR_SIZE,
+               "\\expandafter\\xdef\\csname "
+               "@mem%d\\endcsname{\\expandafter\\csname @reg%d\\endcsname}%%\n",
+               addr, r2);
+  out(output_str, size);
+}
+
+ST_FUNC void out_sr_move(int st_off, int r2) {
+  int size;
+  if (st_off) {
+    size = snprintf(
+        output_str, MAX_STR_SIZE,
+        "\\expandafter\\csname @regStTmp\\endcsname=\\expandafter\\csname "
+        "@regSt\\endcsname%%\n\\advance\\expandafter\\csname "
+        "@regStTmp\\endcsname"
+        "by%d%%\n\\expandafter\\xdef\\csname "
+        "@mem\\expandafter\\the\\@regStTmp\\endcsname{\\expandafter\\csname "
+        "@reg%d\\endcsname}%%\n",
+        st_off, r2);
+  } else {
+    size = snprintf(
+        output_str, MAX_STR_SIZE,
+        "\\expandafter\\xdef\\csname "
+        "@mem\\expandafter\\the\\@regSt\\endcsname{\\expandafter\\csname "
+        "@reg%d\\endcsname}%%\n",
+        r2);
+  }
+  out(output_str, size);
+}
+
+ST_FUNC void out_rmr_move(int r1, int r2) {
+  int size = snprintf(output_str, MAX_STR_SIZE,
+                      "\\expandafter\\xdef\\csname "
+                      "@mem\\expandafter\\the\\csname "
+                      "@reg%d\\endcsname\\endcsname{\\expandafter\\csname "
+                      "@reg%d\\endcsname}%%\n",
+                      r1, r2);
   out(output_str, size);
 }
 
@@ -137,32 +205,36 @@ ST_FUNC void gsym_addr(int t, int a) {
   (void)a;
 }
 
-/* load 'r' from value 'sv' */
-ST_FUNC void load(int r, SValue *sv) {
+/* load 'r' from value 'v' */
+ST_FUNC void load(int r, SValue *v) {
   printf("load %d\n", r);
-  int typ = sv->r & VT_VALMASK;
-  if (sv->r & VT_LVAL) {
+  if (!allocated[r]) {
+    out_r_new(r);
+    allocated[r] = 1;
+  }
+  int typ = v->r & VT_VALMASK;
+  if (v->r & VT_LVAL) {
     if (typ == VT_LLOCAL) {
-      SValue v;
-      v.type.t = VT_INT;
-      v.r = VT_LOCAL | VT_LVAL;
-      v.c.i = sv->c.i;
-      v.sym = NULL;
+      SValue v1;
+      v1.type.t = VT_INT;
+      v1.r = VT_LOCAL | VT_LVAL;
+      v1.c.i = v->c.i;
+      v1.sym = NULL;
       typ = r;
-      if (!(reg_classes[sv->r] & RC_INT))
+      if (!(reg_classes[v->r] & RC_INT))
         typ = get_reg(RC_INT);
-      load(typ, &v);
+      load(typ, &v1);
       printf("VT_LLOCAL ");
     }
-    switch (sv->r) {
+    switch (v->r) {
     default:
-      out_rr_move(r, typ);
+      out_rrm_move(r, typ);
       break;
     case VT_CONST:
-      out_rm_move(r, sv->c.i);
+      out_rm_move(r, v->c.i);
       break;
     case VT_LOCAL:
-      out_rs_move(r, sv->c.i);
+      out_rs_move(r, v->c.i);
       break;
     }
   } else {
@@ -173,10 +245,10 @@ ST_FUNC void load(int r, SValue *sv) {
       }
       break;
     case VT_CONST:
-      out_rc_move(r, sv->c.i);
+      out_rc_move(r, v->c.i);
       break;
     case VT_LOCAL:
-      out_rs_move(r, sv->c.i);
+      out_rs_move(r, v->c.i);
       break;
     case VT_CMP:
       printf("VT_CMP\n");
@@ -194,8 +266,28 @@ ST_FUNC void load(int r, SValue *sv) {
 /* store register 'r' in lvalue 'v' */
 ST_FUNC void store(int r, SValue *v) {
   printf("store %d\n", r);
-  (void)r;
-  (void)v;
+  int typ = v->r & VT_VALMASK;
+  if (v->r & VT_LVAL) {
+    out_rmr_move(typ, r);
+  } else {
+    switch (typ) {
+    default:
+      if (typ != r) {
+        if (!allocated[typ]) {
+          out_r_new(typ);
+          allocated[typ] = 1;
+        }
+        out_rr_move(typ, r);
+      }
+      break;
+    case VT_CONST:
+      out_mr_move(v->c.i, r);
+      break;
+    case VT_LOCAL:
+      out_sr_move(v->c.i, r);
+      break;
+    }
+  }
 }
 
 /* 'is_jmp' is '1' if it is a jump */
@@ -218,15 +310,6 @@ ST_FUNC void gfunc_call(int nb_args) {
   printf("gfunc_call\n");
   (void)nb_args;
 }
-
-// to be compatible with Code Composer for the C67
-// the first 10 parameters must be passed in registers
-// (pairs for 64 bits) starting wit; A4:A5, then B4:B5 and
-// ending with B12:B13.
-//
-// When a call is made, if the caller has its parameters
-// in regs A4-B13 these must be saved before/as the call
-// parameters are loaded and restored upon return (or if/when needed).
 
 /* generate function prolog of type 't' */
 ST_FUNC void gfunc_prolog(Sym *func_sym) {
