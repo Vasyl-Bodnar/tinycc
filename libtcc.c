@@ -53,6 +53,9 @@
 #include "riscv64-gen.c"
 #include "riscv64-link.c"
 #include "riscv64-asm.c"
+#elif defined(TCC_TARGET_TEX)
+#include "tex-gen.c"
+#include "tex-link.c"
 #else
 #error unknown target
 #endif

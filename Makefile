@@ -136,7 +136,7 @@ TCC_X += riscv64 arm64-osx
 # TCC_X += arm-fpa arm-fpa-ld arm-vfp arm-eabi
 
 # cross libtcc1.a targets to build
-LIBTCC1_X = $(filter-out c67,$(TCC_X))
+LIBTCC1_X = $(filter-out c67 tex,$(TCC_X))
 
 PROGS_CROSS = $(foreach X,$(TCC_X),$X-tcc$(EXESUF))
 LIBTCC1_CROSS = $(foreach X,$(LIBTCC1_X),$X-libtcc1.a)
