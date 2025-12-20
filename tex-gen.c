@@ -2,6 +2,7 @@
  *  TeX code generator for TCC
  */
 
+#include "elf.h"
 #ifdef TARGET_DEFS_ONLY
 
 /* number of available registers */
@@ -279,12 +280,6 @@ ST_FUNC void store(int r, SValue *v) {
     }
 }
 
-/* 'is_jmp' is '1' if it is a jump */
-ST_FUNC void gcall_or_jmp(int is_jmp) {
-    printf("gcall_or_jmp\n");
-    (void)is_jmp;
-}
-
 /* Return the number of registers needed to return the struct, or 0 if
    returning via struct pointer. */
 ST_FUNC int gfunc_sret(CType *vt, int variadic, CType *ret, int *ret_align,
@@ -297,21 +292,31 @@ ST_FUNC int gfunc_sret(CType *vt, int variadic, CType *ret, int *ret_align,
    context. Stack entry is popped */
 ST_FUNC void gfunc_call(int nb_args) {
     printf("gfunc_call\n");
-    int size, i;
+    int size, i, r;
+    int *a;
 
-    i = nb_args;
-    size = snprintf(output_str, MAX_STR_SIZE, "\\csname @fun%d\\endcsname",
-                    vtop[0].r);
-    out(output_str, size);
-    vtop--;
+    a = tcc_malloc(nb_args * sizeof(*a));
 
-    for (; i > 0; --i) {
-        int r = gv(RC_INT);
-        size = snprintf(output_str, MAX_STR_SIZE, "\\csname @reg%d\\endcsname",
-                        vtop[0].r);
-        out(output_str, size);
+    /* TODO: Currently we ignore structs */
+    for (i = 0; i < nb_args; ++i) {
+        a[i] = gv(RC_INT);
         vtop--;
     }
+
+    size = snprintf(output_str, MAX_STR_SIZE, "\\csname @fun%d\\endcsname",
+                    vtop[0].sym->c);
+    out(output_str, size);
+
+    vtop--;
+
+    for (i = 0; i < nb_args; ++i) {
+        size = snprintf(output_str, MAX_STR_SIZE, "\\csname @reg%d\\endcsname",
+                        a[i] & VT_VALMASK);
+        out(output_str, size);
+    }
+    out("%\n", 2);
+
+    tcc_free(a);
 }
 
 /* generate function prolog of Sym */
@@ -321,7 +326,7 @@ ST_FUNC void gfunc_prolog(Sym *func_sym) {
     Sym *sym;
     int size, n, i;
 
-    for (n = 0, sym = func_type->ref; sym; sym = sym->next, ++n)
+    for (n = 1, sym = func_type->ref; sym->next; sym = sym->next, ++n)
         ;
 
     for (i = 0; i < n; ++i) {
@@ -329,9 +334,9 @@ ST_FUNC void gfunc_prolog(Sym *func_sym) {
             size = snprintf(output_str, MAX_STR_SIZE, "#%d", i);
             out(output_str, size);
         } else {
-            size =
-                snprintf(output_str, MAX_STR_SIZE,
-                         "\\expandafter\\def\\csname @fun%d\\endcsname", sym);
+            size = snprintf(output_str, MAX_STR_SIZE,
+                            "\\expandafter\\def\\csname @fun%d\\endcsname",
+                            func_sym->c);
             out(output_str, size);
         }
     }
@@ -379,7 +384,8 @@ ST_FUNC int gjmp_append(int n0, int t) {
 
 /* generate an integer binary operation */
 ST_FUNC void gen_opi(int op) {
-    printf("gen_opi\n");
+    printf("gen_opi %d\n", op);
+    vtop--;
     (void)op;
 }
 
