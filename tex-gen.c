@@ -61,8 +61,14 @@ ST_DATA const int reg_classes[NB_REGS] = {
     /* st0 */ RC_INT | RC_ST0,
 };
 
+enum alloc_type {
+    None = 0,
+    ToBeAllocated = 1,
+    Allocated = 2,
+};
+
 /* NOTE: This is a hack so we only need to \newcount once */
-ST_DATA int allocated[NB_REGS] = {0, 0, 0, 0};
+ST_DATA enum alloc_type allocated[NB_REGS] = {0, 0, 0, 0};
 
 /* static string buffer for snprintf reuse */
 #define MAX_STR_SIZE 300
@@ -196,9 +202,8 @@ ST_FUNC void gsym_addr(int t, int a) {
 /* load 'r' from value 'v' */
 ST_FUNC void load(int r, SValue *v) {
     printf("load %d\n", r);
-    if (!allocated[r]) {
-        out_r_new(r);
-        allocated[r] = 1;
+    if (allocated[r] == None) {
+        allocated[r] = ToBeAllocated;
     }
     int typ = v->r & VT_VALMASK;
     if (v->r & VT_LVAL) {
@@ -263,9 +268,8 @@ ST_FUNC void store(int r, SValue *v) {
         switch (typ) {
         default:
             if (typ != r) {
-                if (!allocated[typ]) {
-                    out_r_new(typ);
-                    allocated[typ] = 1;
+                if (allocated[typ] == None) {
+                    allocated[typ] = ToBeAllocated;
                 }
                 out_rr_move(typ, r);
             }
@@ -322,6 +326,15 @@ ST_FUNC void gfunc_call(int nb_args) {
 /* generate function prolog of Sym */
 ST_FUNC void gfunc_prolog(Sym *func_sym) {
     printf("gfunc_prolog\n");
+
+    /* Have to allocate counters somewhere */
+    for (int i = 0; i < sizeof(allocated) / sizeof(enum alloc_type); ++i) {
+        if (allocated[i] == ToBeAllocated) {
+            out_r_new(i);
+            allocated[i] = Allocated;
+        }
+    }
+
     CType *func_type = &func_sym->type;
     Sym *sym;
     int size, n, i;
