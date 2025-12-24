@@ -24,6 +24,11 @@ CFLAGS += $(CPPFLAGS)
 VPATH = $(TOPSRC)
 -LTCC = $(TOP)/$(LIBTCC)
 
+ifeq ($(CONFIG_pie),yes)
+CFLAGS += -fPIE
+LDFLAGS += -pie
+endif
+
 ifdef CONFIG_WIN32
  CFG = -win
  ifneq ($(CONFIG_static),yes)
@@ -369,7 +374,7 @@ IR = $(IM) mkdir -p $2 && cp -r $1/. $2
 IM = @echo "-> $2 : $1" ;
 BINCHECK = $(if $(wildcard $(PROGS) *-tcc$(EXESUF)),,@echo "Makefile: nothing found to install" && exit 1)
 
-EXTRA_O = runmain.o bt-exe.o bt-dll.o bt-log.o bcheck.o
+EXTRA_O = runmain.o run_nostdlib.o bt-exe.o bt-dll.o bt-log.o bcheck.o
 
 # install progs & libs
 install-unx:
@@ -473,7 +478,7 @@ tcc_c$(EXESUF): $($T_FILES)
 sani-tes% : tcc_s$(EXESUF)
 	@$(MAKE) --no-print-directory TCC_LOCAL=$(CURDIR)/$< tes$*
 tcc_s$(EXESUF): $($T_FILES)
-	$S$(CC) tcc.c -o $@ -fsanitize=address,undefined $(DEFINES) $(CFLAGS) $(LIBS)
+	$S$(CC) tcc.c -o $@ -fsanitize=address,undefined $(DEFINES) $(CFLAGS) $(LDFLAGS) $(LIBS)
 # test the installed tcc instead
 test-install: $(TCCDEFS_H)
 	@$(MAKE) -C tests TESTINSTALL=yes #_all

@@ -769,20 +769,6 @@ done:
    tcc_free(info);
 }
 
-void tcc_run_start(int (*prog_main)(int, char **, char **), int cnt, char **var)
-{
-#ifdef __riscv
-    void *sp;
-
-    __asm__("sub sp, sp, %1\n"
-            "\tmv %0, sp"
-            : "=r" (sp)
-            : "r" ((((size_t) cnt + 1) & -2) * sizeof(char *)));
-    memcpy(sp, var, cnt * sizeof(char *));
-    __asm__("jalr %0" : : "r" (prog_main));
-#endif
-}
-
 static int func_sub_sp_offset, num_va_regs, func_va_list_ofs;
 
 ST_FUNC void gfunc_prolog(Sym *func_sym)
@@ -1124,6 +1110,7 @@ static void gen_opil(int op, int ll)
         ER(0x33 | ll, 0, d, a, b, 1); // mul d, a, b
         break;
     case '/':
+    case TOK_PDIV:
         ER(0x33 | ll, 4, d, a, b, 1); // div d, a, b
         break;
     case '&':
@@ -1141,7 +1128,6 @@ static void gen_opil(int op, int ll)
     case TOK_UMOD:
         ER(0x33 | ll, 7, d, a, b, 1); // remu d, a, b
         break;
-    case TOK_PDIV:
     case TOK_UDIV:
         ER(0x33 | ll, 5, d, a, b, 1); // divu d, a, b
         break;

@@ -1677,6 +1677,7 @@ static const TCCOption tcc_options[] = {
     { "C", 0, 0 },
     { "-param", 0, TCC_OPTION_HAS_ARG },
     { "pedantic", 0, 0 },
+    { "pie", 0, 0 },
     { "pipe", 0, 0 },
     { "s", 0, 0 },
     { "traditional", 0, 0 },
