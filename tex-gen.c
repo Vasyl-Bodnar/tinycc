@@ -6,7 +6,7 @@
 #ifdef TARGET_DEFS_ONLY
 
 /* number of available registers */
-#define NB_REGS 4
+#define NB_REGS 5
 
 /* a register can belong to several classes. The classes must be
    sorted from more general to more precise (see gv2() code which does
@@ -15,8 +15,9 @@
 #define RC_FLOAT 0x0002 /* generic float register */
 #define RC_EAX 0x0004
 #define RC_ST0 0x0008
-#define RC_ECX 0x0010
-#define RC_EDX 0x0020
+#define RC_STMP 0x0010
+#define RC_ECX 0x0020
+#define RC_EDX 0x0040
 
 #define RC_IRET RC_EAX /* function return: integer register */
 #define RC_IRE2 RC_ECX /* function return: second integer register */
@@ -28,6 +29,7 @@ enum {
     TREG_ECX,
     TREG_EDX,
     TREG_ST0,
+    TREG_STMP,
 };
 
 /* return registers for function */
@@ -59,16 +61,22 @@ ST_DATA const int reg_classes[NB_REGS] = {
     /* ecx */ RC_INT | RC_ECX,
     /* edx */ RC_INT | RC_EDX,
     /* st0 */ RC_INT | RC_ST0,
+    /* sttmp */ RC_STMP,
 };
 
 enum alloc_type {
     None = 0,
-    ToBeAllocated = 1,
-    Allocated = 2,
+    ToBeAllocated,
+    Allocated,
 };
 
 /* NOTE: This is a hack so we only need to \newcount once */
-ST_DATA enum alloc_type allocated[NB_REGS] = {0, 0, 0, 0};
+ST_DATA enum alloc_type allocated[NB_REGS] = {None, None, None,
+                                              /* st0 */ ToBeAllocated,
+                                              /* sttmp */ ToBeAllocated};
+
+/* NOTE: Keep track of functions arguments per function scope */
+ST_DATA int nb_fun_args = 0;
 
 /* static string buffer for snprintf reuse */
 #define MAX_STR_SIZE 300
@@ -118,24 +126,31 @@ ST_FUNC void out_rm_move(int r1, int addr) {
     out(output_str, size);
 }
 
+ST_FUNC void out_ra_move(int r1, int arg) {
+    int size = snprintf(output_str, MAX_STR_SIZE,
+                        "\\expandafter\\csname @reg%d\\endcsname=#%d%%\n", r1,
+                        arg + 1);
+    out(output_str, size);
+}
+
 ST_FUNC void out_rs_move(int r1, int st_off) {
     int size;
     if (st_off) {
         size = snprintf(
             output_str, MAX_STR_SIZE,
-            "\\expandafter\\csname @regStTmp\\endcsname=\\expandafter\\csname "
-            "@regSt\\endcsname%%\n\\advance\\expandafter\\csname "
-            "@regStTmp\\endcsname"
+            "\\expandafter\\csname @reg%d\\endcsname=\\expandafter\\csname "
+            "@reg%d\\endcsname%%\n\\advance\\expandafter\\csname "
+            "@reg%d\\endcsname "
             "by%d%%\n\\expandafter\\csname "
             "@reg%d\\endcsname=\\expandafter\\csname "
-            "@mem\\the\\@regStTmp\\endcsname%%\n",
-            r1, st_off);
+            "@mem\\the\\csname @reg%d\\endcsname\\endcsname%%\n",
+            TREG_STMP, TREG_ST0, TREG_STMP, st_off, r1, TREG_STMP);
     } else {
         size = snprintf(
             output_str, MAX_STR_SIZE,
             "\\expandafter\\csname @reg%d\\endcsname=\\expandafter\\csname "
-            "@mem\\the\\@regSt\\endcsname%%\n",
-            r1);
+            "@mem\\the\\csname @reg%d\\endcsname\\endcsname%%\n",
+            r1, TREG_ST0);
     }
     out(output_str, size);
 }
@@ -163,21 +178,21 @@ ST_FUNC void out_sr_move(int st_off, int r2) {
     if (st_off) {
         size = snprintf(
             output_str, MAX_STR_SIZE,
-            "\\expandafter\\csname @regStTmp\\endcsname=\\expandafter\\csname "
-            "@regSt\\endcsname%%\n\\advance\\expandafter\\csname "
-            "@regStTmp\\endcsname"
+            "\\expandafter\\csname @reg%d\\endcsname=\\expandafter\\csname "
+            "@reg%d\\endcsname%%\n\\advance\\expandafter\\csname "
+            "@reg%d\\endcsname "
             "by%d%%\n\\expandafter\\xdef\\csname "
-            "@mem\\expandafter\\the\\@regStTmp\\endcsname{"
+            "@mem\\expandafter\\the\\csname @reg%d\\endcsname\\endcsname{"
             "\\expandafter\\csname "
             "@reg%d\\endcsname}%%\n",
-            st_off, r2);
+            TREG_STMP, TREG_ST0, TREG_STMP, st_off, TREG_STMP, r2);
     } else {
-        size = snprintf(
-            output_str, MAX_STR_SIZE,
-            "\\expandafter\\xdef\\csname "
-            "@mem\\expandafter\\the\\@regSt\\endcsname{\\expandafter\\csname "
-            "@reg%d\\endcsname}%%\n",
-            r2);
+        size = snprintf(output_str, MAX_STR_SIZE,
+                        "\\expandafter\\xdef\\csname "
+                        "@mem\\expandafter\\the\\csname "
+                        "@reg%d\\endcsname\\endcsname{\\expandafter\\csname "
+                        "@reg%d\\endcsname}%%\n",
+                        TREG_ST0, r2);
     }
     out(output_str, size);
 }
@@ -202,10 +217,13 @@ ST_FUNC void gsym_addr(int t, int a) {
 /* load 'r' from value 'v' */
 ST_FUNC void load(int r, SValue *v) {
     printf("load %d\n", r);
+
     if (allocated[r] == None) {
         allocated[r] = ToBeAllocated;
     }
+
     int typ = v->r & VT_VALMASK;
+
     if (v->r & VT_LVAL) {
         if (typ == VT_LLOCAL) {
             SValue v1;
@@ -214,22 +232,22 @@ ST_FUNC void load(int r, SValue *v) {
             v1.c.i = v->c.i;
             v1.sym = NULL;
             typ = r;
-            if (!(reg_classes[v->r] & RC_INT))
+            if (!(reg_classes[typ] & RC_INT))
                 typ = get_reg(RC_INT);
             load(typ, &v1);
-            printf("VT_LLOCAL ");
         }
-        switch (v->r) {
-        default:
-            // TODO: This is not that simple
-            out_rrm_move(r, typ);
-            break;
-        case VT_CONST:
+
+        if (typ == VT_LOCAL) {
+            if (v->c.i > nb_fun_args) {
+                out_rs_move(r, v->c.i);
+            } else {
+                out_ra_move(r, v->c.i / MAX_ALIGN);
+            }
+        } else if (typ == VT_CONST) {
             out_rm_move(r, v->c.i);
-            break;
-        case VT_LOCAL:
+        } else {
+            // TODO: This is not that simple
             out_rs_move(r, v->c.i);
-            break;
         }
     } else {
         switch (typ) {
@@ -261,26 +279,21 @@ ST_FUNC void load(int r, SValue *v) {
 ST_FUNC void store(int r, SValue *v) {
     printf("store %d\n", r);
     int typ = v->r & VT_VALMASK;
-    if (v->r & VT_LVAL) {
-        // TODO: This is not that simple
-        out_rmr_move(typ, r);
-    } else {
-        switch (typ) {
-        default:
-            if (typ != r) {
-                if (allocated[typ] == None) {
-                    allocated[typ] = ToBeAllocated;
-                }
-                out_rr_move(typ, r);
+    switch (typ) {
+    default:
+        if (typ != r) {
+            if (allocated[typ] == None) {
+                allocated[typ] = ToBeAllocated;
             }
-            break;
-        case VT_CONST:
-            out_mr_move(v->c.i, r);
-            break;
-        case VT_LOCAL:
-            out_sr_move(v->c.i, r);
-            break;
+            out_rr_move(typ, r);
         }
+        break;
+    case VT_CONST:
+        out_mr_move(v->c.i, r);
+        break;
+    case VT_LOCAL:
+        out_sr_move(v->c.i, r);
+        break;
     }
 }
 
