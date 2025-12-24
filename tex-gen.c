@@ -340,14 +340,6 @@ ST_FUNC void gfunc_call(int nb_args) {
 ST_FUNC void gfunc_prolog(Sym *func_sym) {
     printf("gfunc_prolog\n");
 
-    /* Have to allocate counters somewhere */
-    for (int i = 0; i < sizeof(allocated) / sizeof(enum alloc_type); ++i) {
-        if (allocated[i] == ToBeAllocated) {
-            out_r_new(i);
-            allocated[i] = Allocated;
-        }
-    }
-
     CType *func_type = &func_sym->type;
     Sym *sym;
     int size, n, i;
@@ -373,6 +365,14 @@ ST_FUNC void gfunc_prolog(Sym *func_sym) {
 ST_FUNC void gfunc_epilog(void) {
     printf("gfunc_epilog\n");
     out("}\n", 2);
+
+    /* Have to allocate counters somewhere */
+    for (int i = 0; i < sizeof(allocated) / sizeof(enum alloc_type); ++i) {
+        if (allocated[i] == ToBeAllocated) {
+            out_r_new(i);
+            allocated[i] = Allocated;
+        }
+    }
 }
 
 ST_FUNC void gen_fill_nops(int bytes) {
