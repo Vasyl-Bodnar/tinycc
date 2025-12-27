@@ -6,36 +6,42 @@
 #ifdef TARGET_DEFS_ONLY
 
 /* number of available registers */
-#define NB_REGS 5
+#define NB_REGS 12
 
 /* a register can belong to several classes. The classes must be
    sorted from more general to more precise (see gv2() code which does
    assumptions on it). */
 #define RC_INT 0x0001   /* generic integer register */
 #define RC_FLOAT 0x0002 /* generic float register */
-#define RC_EAX 0x0004
+#define RC_R0 0x0004
 #define RC_ST0 0x0008
 #define RC_STMP 0x0010
-#define RC_ECX 0x0020
-#define RC_EDX 0x0040
+#define RC_R1 0x0020
 
-#define RC_IRET RC_EAX /* function return: integer register */
-#define RC_IRE2 RC_ECX /* function return: second integer register */
-#define RC_FRET RC_EAX /* function return: float register */
+#define RC_IRET RC_R0 /* function return: integer register */
+#define RC_IRE2 RC_R1 /* function return: second integer register */
+#define RC_FRET RC_R0 /* function return: float register */
 
 /* pretty names for the registers */
 enum {
-    TREG_EAX = 0,
-    TREG_ECX,
-    TREG_EDX,
+    TREG_R0 = 0,
+    TREG_R1,
+    TREG_R2,
+    TREG_R3,
+    TREG_R4,
+    TREG_R5,
+    TREG_R6,
+    TREG_R7,
+    TREG_R8,
+    TREG_R9,
     TREG_ST0,
     TREG_STMP,
 };
 
 /* return registers for function */
-#define REG_IRET TREG_EAX /* single word int return register */
-#define REG_IRE2 TREG_ECX /* second word return register (for long long) */
-#define REG_FRET TREG_EAX /* float return register */
+#define REG_IRET TREG_R0 /* single word int return register */
+#define REG_IRE2 TREG_R1 /* second word return register (for long long) */
+#define REG_FRET TREG_R0 /* float return register */
 
 /* pointer size, in bytes */
 #define PTR_SIZE 4
@@ -57,9 +63,16 @@ enum {
 ST_DATA const char *const target_machine_defs = "__TeX__\0";
 
 ST_DATA const int reg_classes[NB_REGS] = {
-    /* eax */ RC_INT | RC_EAX,
-    /* ecx */ RC_INT | RC_ECX,
-    /* edx */ RC_INT | RC_EDX,
+    /* r0 */ RC_INT | RC_R0,
+    /* r1 */ RC_INT | RC_R1,
+    /* r2 */ RC_INT,
+    /* r3 */ RC_INT,
+    /* r4 */ RC_INT,
+    /* r5 */ RC_INT,
+    /* r6 */ RC_INT,
+    /* r7 */ RC_INT,
+    /* r8 */ RC_INT,
+    /* r9 */ RC_INT,
     /* st0 */ RC_INT | RC_ST0,
     /* sttmp */ RC_STMP,
 };
@@ -71,7 +84,16 @@ enum alloc_type {
 };
 
 /* NOTE: This is a hack so we only need to \newcount once */
-ST_DATA enum alloc_type allocated[NB_REGS] = {None, None, None,
+ST_DATA enum alloc_type allocated[NB_REGS] = {None,
+                                              None,
+                                              None,
+                                              None,
+                                              None,
+                                              None,
+                                              None,
+                                              None,
+                                              None,
+                                              None,
                                               /* st0 */ ToBeAllocated,
                                               /* sttmp */ ToBeAllocated};
 
@@ -207,6 +229,26 @@ ST_FUNC void out_rmr_move(int r1, int r2) {
     out(output_str, size);
 }
 
+ST_FUNC void out_r_push(int r1) {
+    int size =
+        snprintf(output_str, MAX_STR_SIZE,
+                 "\\expandafter\\xdef\\csname "
+                 "@mem\\expandafter\\the\\csname "
+                 "@reg%d\\endcsname\\endcsname{\\expandafter\\csname "
+                 "@reg%d\\endcsname}%%\n"
+                 "\\expandafter\\advance\\csname @reg%d\\endcsname by%d%%\n",
+                 TREG_ST0, r1, TREG_ST0, PTR_SIZE);
+    out(output_str, size);
+}
+
+ST_FUNC void out_pop() {
+    int size =
+        snprintf(output_str, MAX_STR_SIZE,
+                 "\\expandafter\\advance\\csname @reg%d\\endcsname by-%d%%\n",
+                 TREG_ST0, PTR_SIZE);
+    out(output_str, size);
+}
+
 /* output a symbol and patch all calls to it */
 ST_FUNC void gsym_addr(int t, int a) {
     printf("gsym_addr\n");
@@ -238,11 +280,7 @@ ST_FUNC void load(int r, SValue *v) {
         }
 
         if (typ == VT_LOCAL) {
-            if (v->c.i > nb_fun_args) {
-                out_rs_move(r, v->c.i);
-            } else {
-                out_ra_move(r, v->c.i / MAX_ALIGN);
-            }
+            out_rs_move(r, v->c.i);
         } else if (typ == VT_CONST) {
             out_rm_move(r, v->c.i);
         } else {
@@ -312,28 +350,20 @@ ST_FUNC void gfunc_call(int nb_args) {
     int size, i, r;
     int *a;
 
-    a = tcc_malloc(nb_args * sizeof(*a));
-
     /* TODO: Currently we ignore structs */
     for (i = 0; i < nb_args; ++i) {
-        a[i] = gv(RC_INT);
+        r = gv(RC_INT);
+        out_r_push(r);
         vtop--;
     }
 
-    size = snprintf(output_str, MAX_STR_SIZE, "\\csname @fun%d\\endcsname",
+    size = snprintf(output_str, MAX_STR_SIZE, "\\csname @fun%d\\endcsname%%\n",
                     vtop[0].sym->c);
     out(output_str, size);
 
+    /* TODO: Currently we use stack instead of argument list */
+
     vtop--;
-
-    for (i = 0; i < nb_args; ++i) {
-        size = snprintf(output_str, MAX_STR_SIZE, "\\csname @reg%d\\endcsname",
-                        a[i] & VT_VALMASK);
-        out(output_str, size);
-    }
-    out("%\n", 2);
-
-    tcc_free(a);
 }
 
 /* generate function prolog of Sym */
@@ -342,32 +372,33 @@ ST_FUNC void gfunc_prolog(Sym *func_sym) {
 
     CType *func_type = &func_sym->type;
     Sym *sym;
-    int size, n, i;
+    int size, i;
 
-    for (n = 1, sym = func_type->ref; sym->next; sym = sym->next, ++n)
+    for (nb_fun_args = 0, sym = func_type->ref; sym->next;
+         sym = sym->next, ++nb_fun_args)
         ;
 
-    for (i = 0; i < n; ++i) {
-        if (i) {
-            size = snprintf(output_str, MAX_STR_SIZE, "#%d", i);
-            out(output_str, size);
-        } else {
-            size = snprintf(output_str, MAX_STR_SIZE,
-                            "\\expandafter\\def\\csname @fun%d\\endcsname",
-                            func_sym->c);
-            out(output_str, size);
-        }
-    }
+    size =
+        snprintf(output_str, MAX_STR_SIZE,
+                 "\\expandafter\\def\\csname @fun%d\\endcsname", func_sym->c);
+    out(output_str, size);
+
     out("{%\n", 3);
 }
 
 /* generate function epilog */
 ST_FUNC void gfunc_epilog(void) {
     printf("gfunc_epilog\n");
+
+    int i;
+    for (i = 0; i < nb_fun_args; ++i) {
+        out_pop();
+    }
+
     out("}\n", 2);
 
     /* Have to allocate counters somewhere */
-    for (int i = 0; i < sizeof(allocated) / sizeof(enum alloc_type); ++i) {
+    for (int i = 0; i < sizeof(allocated) / sizeof(*allocated); ++i) {
         if (allocated[i] == ToBeAllocated) {
             out_r_new(i);
             allocated[i] = Allocated;
@@ -376,7 +407,7 @@ ST_FUNC void gfunc_epilog(void) {
 }
 
 ST_FUNC void gen_fill_nops(int bytes) {
-    printf("void\n");
+    printf("gen_fill_nops\n");
     (void)bytes;
 }
 
