@@ -120,7 +120,10 @@ static int rt_mem(TCCState *s1, int size)
     unlink(tmpfname);
     ftruncate(fd, size);
 
-    ptr = mmap(NULL, size * 2, PROT_READ|PROT_EXEC, MAP_SHARED, fd, 0);
+    ptr = mmap(NULL, size * 2, PROT_READ|PROT_EXEC|(s1->do_debug ? PROT_WRITE : 0), MAP_SHARED, fd, 0);
+    if (ptr == MAP_FAILED)
+	/* Some targets do not support PROT_EXEC + PROT_WRITE */
+        ptr = mmap(NULL, size * 2, PROT_READ|PROT_EXEC, MAP_SHARED, fd, 0);
     /* mmap RW memory at fixed distance */
     prw = mmap((char*)ptr + size, size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_FIXED, fd, 0);
     close(fd);
@@ -299,7 +302,7 @@ static void cleanup_sections(TCCState *s1)
     do {
         for (i = --f; i < p->nb_secs; i++) {
             Section *s = p->secs[i];
-            if (s == s1->symtab || s == s1->symtab->link || s == s1->symtab->hash) {
+            if (s1->do_debug || s == s1->symtab || s == s1->symtab->link || s == s1->symtab->hash) {
                 s->data = tcc_realloc(s->data, s->data_allocated = s->data_offset);
             } else {
                 free_section(s), tcc_free(s), p->secs[i] = NULL;
@@ -311,15 +314,16 @@ static void cleanup_sections(TCCState *s1)
 /* ------------------------------------------------------------- */
 /* 0 = .text rwx  other rw (memory >= 2 pages a 4096 bytes) */
 /* 1 = .text rx   other rw (memory >= 3 pages) */
-/* 2 = .text rx  .rdata ro  .data/.bss rw (memory >= 4 pages) */
+/* 2 = .debug    .debug ro (optional) */
+/* 3 = .text rx  .rdata ro  .data/.bss rw (memory >= 4 pages) */
 
 /* Some targets implement secutiry options that do not allow write in
-   executable code. These targets need CONFIG_RUNMEM_RO=1.
+   executable code. These targets need CONFIG_RUNMEM_RO=2.
    The disadvantage of this is that it requires a little bit more memory. */
 
 #ifndef CONFIG_RUNMEM_RO
 # ifdef __APPLE__
-#   define CONFIG_RUNMEM_RO 1
+#   define CONFIG_RUNMEM_RO 2
 # else
 #   define CONFIG_RUNMEM_RO 0
 #  endif
@@ -355,12 +359,23 @@ redo:
     if (copy == 3)
         return 0;
 
-    for (k = 0; k < 3; ++k) { /* 0:rx, 1:ro, 2:rw sections */
+#if defined TCC_TARGET_MACHO
+    for (k = 0; k < 3; ++k) { /* 0:rx, 1:ro, 3:rw sections */
+#else
+    for (k = 0; k < 4; ++k) { /* 0:rx, 1:ro, 2:ro debug , 3:rw sections */
+#endif
         n = 0; addr = 0;
         for(i = 1; i < s1->nb_sections; i++) {
+#if defined TCC_TARGET_MACHO
             static const char shf[] = {
                 SHF_ALLOC|SHF_EXECINSTR, SHF_ALLOC, SHF_ALLOC|SHF_WRITE
                 };
+#else
+            static const char shf[] = {
+                SHF_ALLOC|SHF_EXECINSTR, SHF_ALLOC, 0, SHF_ALLOC|SHF_WRITE
+                };
+	    if (k == 2 && s1->do_debug == 0) continue;
+#endif
             s = s1->sections[i];
             if (shf[k] != (s->sh_flags & (SHF_ALLOC|SHF_WRITE|SHF_EXECINSTR)))
                 continue;
